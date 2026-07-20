@@ -19,7 +19,7 @@ namespace VanishFF
         public MainForm()
         {
             Text = L.AppTitle;
-            Font = new Font("Segoe UI", 10f);
+            Font = new Font("Segoe UI", 10.5f);
             MinimumSize = new Size(900, 600);
             try { Icon = new Icon(System.IO.Path.Combine(Program.AppDir, "V.ico")); }
             catch { }
@@ -101,6 +101,7 @@ namespace VanishFF
             {
                 var b = new Button();
                 b.Text = names[i];
+                b.Font = new Font("Segoe UI Semibold", 11f);
                 b.AutoSize = true;
                 b.Margin = new Padding(2, 8, 2, 6);
                 b.Padding = new Padding(6, 1, 6, 1);
@@ -116,6 +117,7 @@ namespace VanishFF
                 var stub = new Label();
                 stub.Dock = DockStyle.Fill;
                 stub.TextAlign = ContentAlignment.MiddleCenter;
+                stub.Font = new Font("Segoe UI Semibold", 12.5f);
                 stub.Tag = "dim";
                 stub.Text = string.Format(L.StubPhase, names[i], phases[i]);
                 page.Controls.Add(stub);
