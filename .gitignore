@@ -1,0 +1,6 @@
+﻿ffmpeg/
+settings.json
+temp/
+logs/
+*.log
+obj/
