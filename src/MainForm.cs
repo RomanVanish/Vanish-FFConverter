@@ -37,8 +37,7 @@ namespace VanishFF
             Text = L.AppTitle;
             Font = new Font("Segoe UI", 10.5f);
             AutoScaleMode = AutoScaleMode.Font;
-            try { Icon = new Icon(System.IO.Path.Combine(Program.AppDir, "V.ico")); }
-            catch { }
+            LoadAppIcon();
 
             // геометрия из настроек (ТЗ 2.1). Сохранённый размер уже в
             // пикселях экрана; размеры по умолчанию масштабируются по DPI
@@ -456,6 +455,20 @@ namespace VanishFF
             if (tabAudio != null) tabAudio.RefreshTheme();
             ApplyOverallColor();   // не дать теме сбросить цвет статуса в серый
             Invalidate(true);
+        }
+
+        void LoadAppIcon()
+        {
+            // грузим конкретный кадр 32x32 (без размера new Icon может выбрать
+            // кадр, который не отрисуется на форме); запасной путь — иконка
+            // из самого exe
+            try { Icon = new Icon(System.IO.Path.Combine(Program.AppDir, "V.ico"),
+                                  32, 32); }
+            catch
+            {
+                try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+                catch { }
+            }
         }
 
         public void SetStatus(string text)
