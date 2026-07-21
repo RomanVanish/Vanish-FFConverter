@@ -460,7 +460,11 @@ namespace VanishFF
 
         public void SetStatus(string text)
         {
+            bool has = !string.IsNullOrEmpty(text);
             statusLabel.Text = text;
+            statusLabel.Visible = has;
+            // без детальной строки — полоса в одну строку (нет пустого места)
+            statusBar.Height = has ? 56 : 32;
         }
 
         // Окно растёт вниз, если контенту вкладки не хватает высоты

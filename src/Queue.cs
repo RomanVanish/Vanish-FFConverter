@@ -37,7 +37,22 @@ namespace VanishFF
 
         public bool Running { get { return running; } }
 
+        FileEntry singleEntry;   // != null — прогнать только это задание
+
         public void Start()
+        {
+            singleEntry = null;
+            StartWorker();
+        }
+
+        // Запустить только одно задание (контекст-меню «запустить это»).
+        public void StartSingle(FileEntry e)
+        {
+            singleEntry = e;
+            StartWorker();
+        }
+
+        void StartWorker()
         {
             stopNow = false;
             skipCurrent = false;
@@ -77,6 +92,16 @@ namespace VanishFF
                     if (stopNow || PauseAfter) break;
 
                     FileEntry next = null;
+                    if (singleEntry != null)
+                    {
+                        // режим «только это задание»: один заход и выход
+                        if (singleEntry.Status == FileStatus.Queued)
+                            next = singleEntry;
+                        if (next == null) break;
+                        RunOne(next);
+                        break;
+                    }
+
                     var list = new List<FileEntry>();
                     var ev = new ManualResetEvent(false);
                     OnUi(delegate { list.AddRange(GetQueued()); ev.Set(); });

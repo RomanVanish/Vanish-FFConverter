@@ -57,12 +57,15 @@ namespace VanishFF
         Label opusBrLabel;
         RadioButton opusAuto, opusVoip;
         CheckBox opusVbr;
-        RadioButton mp3Cbr, mp3Vbr;
-        ComboBox mp3Bitrate, mp3Q;
-        Label mp3BrLbl, mp3QLbl;
-        RadioButton aacCbr, aacVbr;
-        ComboBox aacBitrate, aacQ;
-        Label aacBrLbl, aacQLbl;
+        RadioButton mp3Cbr, mp3Vbr, aacCbr, aacVbr;
+        Label mp3ValLbl, aacValLbl;
+        ComboBox mp3Val, aacVal;
+        bool mp3IsVbr, aacIsVbr;
+        int mp3BrIdx = 2, mp3QIdx = 1, aacBrIdx = 3, aacQIdx = 2;
+        static readonly string[] Mp3Br = { "64","96","128","160","192","256","320" };
+        static readonly string[] Mp3Q = { "V0 — лучшее","V2","V4 — среднее","V6","V9 — худшее" };
+        static readonly string[] AacBr = { "48","64","96","128","192","256","320" };
+        static readonly string[] AacQ = { "1 — хуже/меньше","2","3 — среднее","4","5 — лучше/больше" };
         ComboBox flacLevel, flacBits, wavBits;
 
         TableLayoutPanel grid;
@@ -136,6 +139,34 @@ namespace VanishFF
             var filesWrap = Bordered.Wrap(files);
             filesWrap.MinimumSize = new Size(0, 120);
             grid.Controls.Add(filesWrap, 0, 1);
+
+            // контекстное меню по правому клику
+            var fileMenu = new ContextMenuStrip();
+            var miRunOne = new ToolStripMenuItem("Запустить только это задание", null,
+                delegate { RunSelectedOnly(); });
+            var miCancel = new ToolStripMenuItem("Отменить задание", null,
+                delegate { CancelSelectedJob(); });
+            var miRemove = new ToolStripMenuItem("Удалить из списка", null,
+                delegate { files.RemoveSelected(); });
+            var miOpen = new ToolStripMenuItem("Открыть папку с результатом", null,
+                delegate { OpenResultFolder(); });
+            fileMenu.Items.Add(miRunOne);
+            fileMenu.Items.Add(miCancel);
+            fileMenu.Items.Add(miOpen);
+            fileMenu.Items.Add(new ToolStripSeparator());
+            fileMenu.Items.Add(miRemove);
+            fileMenu.Opening += delegate(object s, System.ComponentModel.CancelEventArgs e)
+            {
+                var en = files.SelectedEntry;
+                if (en == null) { e.Cancel = true; return; }
+                // запустить только это — когда очередь не работает и файл не в работе
+                miRunOne.Enabled = !queue.Running && en.Status != FileStatus.Working;
+                miCancel.Enabled = en.Status == FileStatus.Queued;
+                miOpen.Visible = en.Status == FileStatus.Done
+                    && !string.IsNullOrEmpty(en.OutputPath);
+                miRemove.Enabled = en.Status != FileStatus.Working;
+            };
+            files.ContextMenuStrip = fileMenu;
 
             // 2: кнопки списка
             var fRow = Row();
@@ -226,6 +257,7 @@ namespace VanishFF
                 "−16 LUFS — речь, подкасты",
                 "−18 LUFS — тише, аудиокниги",
                 "−23 LUFS — вещательный стандарт" }, 232);
+            lufs.DropDownWidth = 320;   // полный текст в выпадающем списке
             lufs.SelectedIndex = 1;
             normBox.Controls.Add(lufs);
             normBox.Controls.Add(Tips.Icon(
@@ -536,7 +568,7 @@ namespace VanishFF
             pOpus = opusBox;
             box.Controls.Add(opusBox);
 
-            // mp3 — режим CBR/VBR, под ним битрейт или качество
+            // mp3 — режим CBR/VBR; один combo меняет содержимое (битрейт/качество)
             var rm = Row();
             rm.Controls.Add(MkLbl("Режим:"));
             mp3Cbr = MkRadio("CBR", true);
@@ -546,59 +578,47 @@ namespace VanishFF
                 + "обычно выгоднее CBR по размеру.");
             rm.Controls.Add(mp3Cbr);
             rm.Controls.Add(mp3Vbr);
-            mp3BrLbl = MkLbl("    Битрейт:");
-            rm.Controls.Add(mp3BrLbl);
-            mp3Bitrate = MkCombo(new string[] {
-                "64", "96", "128", "160", "192", "256", "320" }, 84);
-            mp3Bitrate.SelectedIndex = 2;
-            mp3Bitrate.SelectedIndexChanged += delegate { OnManualChange(); };
-            rm.Controls.Add(mp3Bitrate);
-            mp3QLbl = MkLbl("    Качество:");
-            rm.Controls.Add(mp3QLbl);
-            mp3Q = MkCombo(new string[] {
-                "V0 — лучшее", "V2", "V4 — среднее", "V6", "V9 — худшее" }, 150);
-            mp3Q.SelectedIndex = 1;
-            mp3Q.SelectedIndexChanged += delegate { OnManualChange(); };
-            rm.Controls.Add(mp3Q);
-            mp3Cbr.CheckedChanged += delegate { UpdateCbrVbr(); OnManualChange(); };
+            mp3ValLbl = MkLbl("     Битрейт:");
+            rm.Controls.Add(mp3ValLbl);
+            mp3Val = MkCombo(Mp3Br, 150);
+            mp3Val.SelectedIndex = mp3BrIdx;
+            mp3Val.SelectedIndexChanged += delegate { OnCodecValChanged(false); };
+            rm.Controls.Add(mp3Val);
+            mp3Cbr.CheckedChanged += delegate { SwitchMode(false); };
             pMp3 = rm;
             box.Controls.Add(rm);
 
-            // aac — режим CBR/VBR, под ним битрейт или качество
+            // aac — режим CBR/VBR; один combo меняет содержимое
             var ra = Row();
             ra.Controls.Add(MkLbl("Режим:"));
             aacCbr = MkRadio("CBR", true);
             aacVbr = MkRadio("VBR", false);
             ra.Controls.Add(aacCbr);
             ra.Controls.Add(aacVbr);
-            aacBrLbl = MkLbl("    Битрейт:");
-            ra.Controls.Add(aacBrLbl);
-            aacBitrate = MkCombo(new string[] {
-                "48", "64", "96", "128", "192", "256", "320" }, 84);
-            aacBitrate.SelectedIndex = 3;
-            aacBitrate.SelectedIndexChanged += delegate { OnManualChange(); };
-            ra.Controls.Add(aacBitrate);
-            aacQLbl = MkLbl("    Качество:");
-            ra.Controls.Add(aacQLbl);
-            aacQ = MkCombo(new string[] {
-                "1 — хуже/меньше", "2", "3 — среднее", "4", "5 — лучше/больше" }, 170);
-            aacQ.SelectedIndex = 2;
-            aacQ.SelectedIndexChanged += delegate { OnManualChange(); };
-            ra.Controls.Add(aacQ);
-            aacCbr.CheckedChanged += delegate { UpdateCbrVbr(); OnManualChange(); };
+            aacValLbl = MkLbl("     Битрейт:");
+            ra.Controls.Add(aacValLbl);
+            aacVal = MkCombo(AacBr, 170);
+            aacVal.SelectedIndex = aacBrIdx;
+            aacVal.SelectedIndexChanged += delegate { OnCodecValChanged(true); };
+            ra.Controls.Add(aacVal);
+            aacCbr.CheckedChanged += delegate { SwitchMode(true); };
             pAac = ra;
             box.Controls.Add(ra);
 
             // flac
             var rf = Row();
             rf.Controls.Add(MkLbl("Сжатие:"));
-            flacLevel = MkCombo(new string[] { "0", "1", "2", "3", "4", "5", "6", "7", "8" }, 60);
+            flacLevel = MkCombo(new string[] {
+                "0 — минимальное", "1", "2", "3", "4 — среднее", "5",
+                "6", "7", "8 — максимальное" }, 150);
+            flacLevel.DropDownWidth = 190;
             flacLevel.SelectedIndex = 5;
-            Tips.Set(flacLevel,
+            rf.Controls.Add(flacLevel);
+            rf.Controls.Add(Tips.Icon(
                 "Уровень сжатия НЕ влияет на качество звука (формат без\n" +
                 "потерь) — только на размер файла и время кодирования:\n" +
-                "8 — жмёт сильнее, но дольше. Обычно достаточно 5.");
-            rf.Controls.Add(flacLevel);
+                "8 — жмёт сильнее, но дольше; 0 — быстрее, но крупнее.\n" +
+                "Обычно достаточно 5 (значение по умолчанию)."));
             rf.Controls.Add(MkLbl("   Разрядность:"));
             flacBits = MkCombo(new string[] { "как в исходнике", "16 бит", "24 бита" }, 160);
             flacBits.SelectedIndex = 0;
@@ -635,14 +655,34 @@ namespace VanishFF
                 "программы, поэтому перекрывает их (у ffmpeg побеждает\n" +
                 "последняя опция). Полная команда печатается в консоль.\n" +
                 "\n" +
-                "Примеры для аудио:\n" +
-                "  -af \"highpass=f=80\"      убрать низкочастотный гул\n" +
-                "  -af \"afftdn=nf=-25\"      шумоподавление\n" +
-                "  -af \"atempo=1.5\"         ускорить в 1.5× (без смены тона)\n" +
-                "  -ss 0 -t 60               только первые 60 секунд\n" +
-                "  -metadata title=\"Эфир\"   вписать название\n" +
-                "  -ac 2                     принудительно 2 канала");
+                "Чистка и обработка звука (-af = аудиофильтр):\n" +
+                "  -af \"highpass=f=100\"      убрать гул/рокот снизу\n" +
+                "  -af \"lowpass=f=15000\"     убрать шипение сверху\n" +
+                "  -af \"afftdn=nf=-25\"       шумоподавление (фон, шум)\n" +
+                "  -af \"acompressor\"         сжать динамику (тихо↔громко)\n" +
+                "  -af \"silenceremove=...\"   вырезать паузы тишины\n" +
+                "  -af \"afade=t=in:d=2\"      плавное появление 2 сек\n" +
+                "  -af \"atempo=1.5\"          ускорить ×1.5 (тон сохранён)\n" +
+                "  -af \"volume=6dB\"          поднять громкость на 6 дБ\n" +
+                "\n" +
+                "Обрезка и метаданные:\n" +
+                "  -ss 30 -t 120             взять кусок с 0:30 длиной 2:00\n" +
+                "  -metadata artist=\"Имя\"    вписать исполнителя/название\n" +
+                "\n" +
+                "Тонкая настройка кодека:\n" +
+                "  -cutoff 15000             срез ВЧ у opus/aac (меньше файл)\n" +
+                "  -sample_fmt s16           разрядность выборки\n" +
+                "Несколько фильтров подряд: -af \"highpass=f=100,afftdn\"");
             rc.Controls.Add(Bordered.Wrap(extraArgs));
+            var bExtraHelp = MkBtn("?", delegate
+            {
+                HelpBox.Show(FindForm(),
+                    "Доп. параметры ffmpeg — справка", ExtraArgsHelp);
+            });
+            bExtraHelp.Width = 30;
+            bExtraHelp.AutoSize = false;
+            bExtraHelp.Height = 28;
+            rc.Controls.Add(bExtraHelp);
             box.Controls.Add(rc);
 
             adv.Content.Controls.Add(box);
@@ -732,13 +772,21 @@ namespace VanishFF
             }
             else if (f == "mp3")
             {
-                mp3Cbr.Checked = true;
-                SelectByText(mp3Bitrate, br.ToString());
+                mp3IsVbr = false; mp3Vbr.Checked = false; mp3Cbr.Checked = true;
+                mp3ValLbl.Text = "     Битрейт:";
+                mp3Val.Items.Clear(); mp3Val.Items.AddRange(Mp3Br);
+                int idx = Array.IndexOf(Mp3Br, br.ToString());
+                mp3BrIdx = idx < 0 ? 2 : idx;
+                mp3Val.SelectedIndex = mp3BrIdx;
             }
             else if (f == "aac")
             {
-                aacCbr.Checked = true;
-                SelectByText(aacBitrate, br.ToString());
+                aacIsVbr = false; aacVbr.Checked = false; aacCbr.Checked = true;
+                aacValLbl.Text = "     Битрейт:";
+                aacVal.Items.Clear(); aacVal.Items.AddRange(AacBr);
+                int idx = Array.IndexOf(AacBr, br.ToString());
+                aacBrIdx = idx < 0 ? 3 : idx;
+                aacVal.SelectedIndex = aacBrIdx;
             }
             // «Максимум — музыка» снимает нормализацию (ТЗ 3.4)
             if (pi == 3 && normalize.Checked) normalize.Checked = false;
@@ -772,11 +820,15 @@ namespace VanishFF
             bool lossy = f == "opus" || f == "mp3" || f == "aac";
             quality.Enabled = lossy;
             suffix.Text = " + ." + OutExt(f);
-            UpdateCbrVbr();
             // блок настроек сменил высоту (opus выше mp3) — пусть окно
-            // подрастёт вниз, а не сжимает список файлов
-            if (EnsureHeight != null && grid != null)
-                EnsureHeight(grid.PreferredSize.Height);
+            // подрастёт вниз, а не сжимает список файлов (после переразметки)
+            if (IsHandleCreated)
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    grid.PerformLayout();
+                    if (EnsureHeight != null)
+                        EnsureHeight(grid.PreferredSize.Height);
+                });
         }
 
         // Расширение результата: aac пакуем в .m4a (в сыром .aac нет
@@ -786,19 +838,134 @@ namespace VanishFF
             return fmt == "aac" ? "m4a" : fmt;
         }
 
-        // CBR -> показываем битрейт, VBR -> качество (для mp3 и aac);
-        // метка всегда перед своим значением, порядок не съезжает
-        void UpdateCbrVbr()
+        const string ExtraArgsHelp =
+"ДОП. ПАРАМЕТРЫ FFMPEG\n" +
+"\n" +
+"Это способ добавить возможности, которых нет в интерфейсе, —\n" +
+"почистить звук, обрезать, вписать теги, тонко настроить кодек.\n" +
+"Всё, что вы сюда впишете, дописывается в команду и может как\n" +
+"дополнять, так и переопределять настройки программы (у ffmpeg\n" +
+"побеждает последняя одноимённая опция). Полная команда всегда\n" +
+"печатается в консоль — видно, что получилось.\n" +
+"\n" +
+"ГЛАВНОЕ: битрейт/кодек/каналы/частоту/нормализацию писать НЕ\n" +
+"нужно — программа уже подставляет их из настроек выше (Формат,\n" +
+"Качество, Каналы, Нормализация). Это поле — ТОЛЬКО для\n" +
+"дополнительного: фильтров, обрезки, тегов, редких опций кодека.\n" +
+"Если всё же впишете, например, -b:a — ваше значение перебьёт\n" +
+"выбранное в программе (последняя опция побеждает), но обычно\n" +
+"это не нужно.\n" +
+"\n" +
+"─────────────────────────────────────────────\n" +
+"КУДА ИМЕННО ОНИ ПОПАДАЮТ (важно!)\n" +
+"─────────────────────────────────────────────\n" +
+"Один файл обрабатывается в НЕСКОЛЬКО заходов ffmpeg подряд:\n" +
+"  1) извлечение дорожки во временный WAV\n" +
+"  2) измерение громкости (если включена нормализация)\n" +
+"  3) нормализация\n" +
+"  4) КОДИРОВАНИЕ в итоговый файл\n" +
+"\n" +
+"Ваши доп. параметры добавляются ТОЛЬКО к последнему шагу —\n" +
+"к кодированию, которое создаёт итоговый файл. Первые шаги —\n" +
+"внутренняя кухня, их трогать не нужно.\n" +
+"\n" +
+"Что это значит на практике: аудиофильтр (-af) применяется к\n" +
+"звуку, который уже извлечён и нормализован, то есть к финальному\n" +
+"результату — как и ожидаешь. Обрезка по времени, теги, настройки\n" +
+"кодека — тоже применяются к итоговому файлу.\n" +
+"\n" +
+"─────────────────────────────────────────────\n" +
+"ЧИСТКА И ОБРАБОТКА ЗВУКА  (-af = аудиофильтр)\n" +
+"─────────────────────────────────────────────\n" +
+"  -af \"highpass=f=100\"     убрать низкий гул/рокот\n" +
+"  -af \"lowpass=f=15000\"    убрать высокочастотное шипение\n" +
+"  -af \"afftdn=nf=-25\"      шумоподавление (ровный фон, шум)\n" +
+"  -af \"anlmdn\"             более мягкое шумоподавление\n" +
+"  -af \"acompressor\"        сжать динамику: тихое громче,\n" +
+"                            громкое тише (речь ровнее)\n" +
+"  -af \"alimiter\"           ограничитель пиков (без перегруза)\n" +
+"  -af \"silenceremove=start_periods=1:start_threshold=-40dB\"\n" +
+"                            обрезать тишину в начале\n" +
+"  -af \"afade=t=in:d=2\"     плавное появление 2 секунды\n" +
+"  -af \"afade=t=out:st=58:d=2\"  затухание в конце\n" +
+"  -af \"atempo=1.5\"         ускорить ×1.5 (тон сохраняется)\n" +
+"  -af \"volume=6dB\"         поднять громкость на 6 дБ\n" +
+"\n" +
+"Несколько фильтров сразу — через запятую в одной строке:\n" +
+"  -af \"highpass=f=100,afftdn,acompressor\"\n" +
+"\n" +
+"─────────────────────────────────────────────\n" +
+"ОБРЕЗКА ПО ВРЕМЕНИ И ТЕГИ\n" +
+"─────────────────────────────────────────────\n" +
+"  -ss 30 -t 120            взять кусок с 0:30 длиной 2:00\n" +
+"  -ss 90                   начать с 1:30 и до конца\n" +
+"  -metadata artist=\"Имя\"   исполнитель\n" +
+"  -metadata title=\"Эфир\"   название\n" +
+"  -metadata:s:a:0 language=rus   язык дорожки\n" +
+"\n" +
+"─────────────────────────────────────────────\n" +
+"ТОНКАЯ НАСТРОЙКА КОДЕКА\n" +
+"─────────────────────────────────────────────\n" +
+"  -cutoff 15000            срез верхних частот у opus/aac —\n" +
+"                            меньше размер без слышимой потери\n" +
+"  -sample_fmt s16          разрядность выборки\n" +
+"  -frame_duration 60       (opus) длиннее кадр — чуть меньше файл\n" +
+"  -compression_level 10    (opus) макс. сжатие, медленнее\n" +
+"\n" +
+"─────────────────────────────────────────────\n" +
+"ЧЕГО НЕ НАДО\n" +
+"─────────────────────────────────────────────\n" +
+"• Не дублируйте -c:a и -b:a — их программа уже ставит.\n" +
+"• Видео-опции бессмысленны: на вкладке «Аудио» видео\n" +
+"  отбрасывается.\n" +
+"• Фильтр -af может конфликтовать с режимами «Моно (сведение)»\n" +
+"  и «Стерео: по ушам» — там уже используется сложный фильтр\n" +
+"  сведения. Для обработки фильтрами берите «Как в исходнике».";
+
+        // Переключение CBR<->VBR: сохраняем выбор старого режима, меняем
+        // метку и список значений (битрейт<->качество), ставим выбор нового.
+        void SwitchMode(bool aac)
         {
-            if (mp3Cbr == null) return;
-            bool mc = mp3Cbr.Checked;
-            mp3BrLbl.Visible = mp3Bitrate.Visible = mc;
-            mp3QLbl.Visible = mp3Q.Visible = !mc;
-            bool ac = aacCbr.Checked;
-            aacBrLbl.Visible = aacBitrate.Visible = ac;
-            aacQLbl.Visible = aacQ.Visible = !ac;
-            pMp3.PerformLayout();   // форсируем реорганизацию видимых
-            pAac.PerformLayout();
+            if (mp3Cbr == null || syncing) return;
+            syncing = true;
+            if (aac)
+            {
+                if (aacIsVbr) aacQIdx = aacVal.SelectedIndex;
+                else aacBrIdx = aacVal.SelectedIndex;
+                aacIsVbr = aacVbr.Checked;
+                aacValLbl.Text = aacIsVbr ? "     Качество:" : "     Битрейт:";
+                aacVal.Items.Clear();
+                aacVal.Items.AddRange(aacIsVbr ? AacQ : AacBr);
+                aacVal.SelectedIndex = aacIsVbr ? aacQIdx : aacBrIdx;
+            }
+            else
+            {
+                if (mp3IsVbr) mp3QIdx = mp3Val.SelectedIndex;
+                else mp3BrIdx = mp3Val.SelectedIndex;
+                mp3IsVbr = mp3Vbr.Checked;
+                mp3ValLbl.Text = mp3IsVbr ? "     Качество:" : "     Битрейт:";
+                mp3Val.Items.Clear();
+                mp3Val.Items.AddRange(mp3IsVbr ? Mp3Q : Mp3Br);
+                mp3Val.SelectedIndex = mp3IsVbr ? mp3QIdx : mp3BrIdx;
+            }
+            syncing = false;
+            OnManualChange();
+        }
+
+        void OnCodecValChanged(bool aac)
+        {
+            if (syncing) return;
+            if (aac)
+            {
+                if (aacIsVbr) aacQIdx = aacVal.SelectedIndex;
+                else aacBrIdx = aacVal.SelectedIndex;
+            }
+            else
+            {
+                if (mp3IsVbr) mp3QIdx = mp3Val.SelectedIndex;
+                else mp3BrIdx = mp3Val.SelectedIndex;
+            }
+            OnManualChange();
         }
 
         // «Рядом с исходником» -> поле пути серое
@@ -918,14 +1085,16 @@ namespace VanishFF
             else if (s.Format == "mp3")
             {
                 s.VbrMode = mp3Vbr.Checked;
-                int.TryParse((string)mp3Bitrate.SelectedItem, out s.BitrateKbps);
-                s.VbrQuality = int.Parse(((string)mp3Q.SelectedItem).Substring(1, 1));
+                if (s.VbrMode)
+                    s.VbrQuality = int.Parse(
+                        ((string)mp3Val.SelectedItem).Substring(1, 1));
+                else int.TryParse((string)mp3Val.SelectedItem, out s.BitrateKbps);
             }
             else if (s.Format == "aac")
             {
                 s.VbrMode = aacVbr.Checked;
-                int.TryParse((string)aacBitrate.SelectedItem, out s.BitrateKbps);
-                s.VbrQuality = aacQ.SelectedIndex + 1;
+                if (s.VbrMode) s.VbrQuality = aacVal.SelectedIndex + 1;
+                else int.TryParse((string)aacVal.SelectedItem, out s.BitrateKbps);
             }
             s.FlacLevel = flacLevel.SelectedIndex;
             s.FlacBits = flacBits.SelectedIndex == 1 ? 16
@@ -1018,6 +1187,63 @@ namespace VanishFF
                 return ow && (st == FileStatus.Done
                     || st == FileStatus.Skipped || st == FileStatus.Error);
             });
+        }
+
+        // Запустить только выбранный файл (остальную очередь не трогаем).
+        void RunSelectedOnly()
+        {
+            var e = files.SelectedEntry;
+            if (e == null || queue.Running || e.Status == FileStatus.Working)
+                return;
+            if (e.Status != FileStatus.Queued)   // ещё нет задания — создаём снимок
+            {
+                e.Job = Snapshot();
+                e.Status = FileStatus.Queued;
+                e.BatchIndex = 1;
+                files.UpdateEntry(e);
+            }
+            runTotal = 1;
+            runDone = 0;
+            miPause.Checked = false;
+            SaveSettings();
+            Settings.Save();
+            if (t0 == null)
+            {
+                t0 = DateTime.Now;
+                if (NewLog != null) NewLog();
+            }
+            timer.Start();
+            bStop.Enabled = true;
+            bStopMenu.Enabled = true;
+            if (ShowLog != null) ShowLog();
+            queue.StartSingle(e);
+            UpdateStatusBar();
+        }
+
+        // Отменить задание выбранного файла (вернуть в «ожидание»).
+        void CancelSelectedJob()
+        {
+            var e = files.SelectedEntry;
+            if (e == null || e.Status != FileStatus.Queued) return;
+            e.Status = FileStatus.Waiting;
+            e.Job = null;
+            e.Note = "";
+            files.UpdateEntry(e);
+            UpdateQueueButton();
+            UpdateStatusBar();
+        }
+
+        void OpenResultFolder()
+        {
+            var e = files.SelectedEntry;
+            if (e == null || string.IsNullOrEmpty(e.OutputPath)) return;
+            if (!System.IO.File.Exists(e.OutputPath)) return;
+            try
+            {
+                System.Diagnostics.Process.Start("explorer.exe",
+                    "/select,\"" + e.OutputPath + "\"");
+            }
+            catch { }
         }
 
         // Снять задания со всех файлов в очереди (кроме работающего).
@@ -1333,7 +1559,6 @@ namespace VanishFF
             adv.Expanded = Settings.GetB("au_adv", false);
             ApplyPreset();
             UpdateOutputUi();
-            UpdateCbrVbr();
             UpdateNormUi();
         }
 

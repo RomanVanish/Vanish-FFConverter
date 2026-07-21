@@ -414,6 +414,15 @@ namespace VanishFF
             {
                 if (e.KeyCode == Keys.Delete) { RemoveSelected(); e.Handled = true; }
             };
+            MouseDown += delegate(object s, MouseEventArgs e)
+            {
+                // правый клик выделяет строку под курсором (для контекст-меню)
+                if (e.Button == MouseButtons.Right)
+                {
+                    var it = GetItemAt(e.X, e.Y);
+                    if (it != null) { SelectedItems.Clear(); it.Selected = true; }
+                }
+            };
             SelectedIndexChanged += delegate
             {
                 if (SelectionChangedCb != null)
@@ -786,6 +795,46 @@ namespace VanishFF
         }
 
         public Action<string[]> FilesDropped;
+    }
+
+    // Немодальное окно-справка с прокруткой (в палитре темы).
+    static class HelpBox
+    {
+        public static void Show(IWin32Window owner, string title, string text)
+        {
+            var f = new Form();
+            f.Text = title;
+            f.StartPosition = FormStartPosition.CenterParent;
+            f.ClientSize = new Size(700, 580);
+            f.MinimumSize = new Size(460, 320);
+            f.Font = new Font("Segoe UI", 10f);
+            f.ShowInTaskbar = false;
+            try { f.Icon = new Icon(Path.Combine(Program.AppDir, "V.ico")); }
+            catch { }
+
+            var box = new RichTextBox();
+            box.ReadOnly = true;
+            box.BorderStyle = BorderStyle.None;
+            box.WordWrap = true;
+            box.ScrollBars = RichTextBoxScrollBars.Vertical;
+            box.Dock = DockStyle.Fill;
+            box.Tag = "console";
+            box.Font = new Font("Segoe UI", 10.5f);
+            box.Text = text;
+
+            var inner = new Panel();
+            inner.Dock = DockStyle.Fill;
+            inner.Padding = new Padding(10, 8, 6, 8);
+            inner.Tag = "console";
+            inner.Controls.Add(box);
+            f.Controls.Add(inner);
+
+            Theme.Apply(f);
+            box.BackColor = Theme.Current.ConsoleBg;
+            box.ForeColor = Theme.Current.Text;
+            f.Shown += delegate { Theme.ApplyTitleBar(f); };
+            f.Show(owner);
+        }
     }
 
     // Свои диалоги в палитре (системный MessageBox не темнеет, ТЗ 2.6).
