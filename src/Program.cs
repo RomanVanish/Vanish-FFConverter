@@ -17,16 +17,12 @@ namespace VanishFF
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            // Проверка при старте (ТЗ 2.5): без ffmpeg программа бессмысленна
-            if (!File.Exists(FFmpeg) || !File.Exists(FFprobe))
-            {
-                MessageBox.Show(L.ErrNoFFmpeg, L.AppTitle,
-                                MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
             Settings.Load();
             Theme.Current = Settings.GetB("theme_dark", true) ? Theme.Dark : Theme.Light;
+
+            // Проверка при старте: без ffmpeg предлагаем скачать/взять вручную
+            // (или выйти). Скрипты для этого больше не нужны.
+            if (!FFmpegSetup.Ensure()) return;
 
             try
             {
