@@ -18,6 +18,9 @@ namespace VanishFF
         public Color Accent;     // терракота: Старт, активная вкладка
         public Color AccentHover;
         public Color AccentText; // текст на акцентной заливке
+        public Color StQueued;   // статусы файлов (ТЗ 2.6)
+        public Color StDone;
+        public Color StError;
     }
 
     static class Theme
@@ -34,6 +37,9 @@ namespace VanishFF
             Accent = FromHex("D97757"),
             AccentHover = FromHex("C4633F"),
             AccentText = FromHex("FAF9F5"),
+            StQueued = FromHex("D9C27A"),
+            StDone = FromHex("7FBF7F"),
+            StError = FromHex("E08080"),
         };
 
         public static readonly Palette Light = new Palette
@@ -48,6 +54,9 @@ namespace VanishFF
             Accent = FromHex("D97757"),
             AccentHover = FromHex("C4633F"),
             AccentText = FromHex("FFFFFF"),
+            StQueued = FromHex("A8862B"),
+            StDone = FromHex("3E8E3E"),
+            StError = FromHex("C05050"),
         };
 
         public static Palette Current = Dark;

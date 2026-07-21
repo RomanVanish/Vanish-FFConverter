@@ -15,6 +15,8 @@ namespace VanishFF
         Button[] tabButtons;
         Panel[] pages;
         int activeTab;
+        QueueManager queueMgr;
+        TabAudio tabAudio;
 
         public MainForm()
         {
@@ -40,6 +42,16 @@ namespace VanishFF
                 WindowState = FormWindowState.Maximized;
 
             BuildLayout();
+
+            // глобальная очередь (ТЗ 2.4) + первая рабочая вкладка
+            queueMgr = new QueueManager(this);
+            QueueManager.I = queueMgr;
+            queueMgr.Status = SetStatus;
+            tabAudio = new TabAudio(queueMgr);
+            tabAudio.SetStatusBar = SetStatus;
+            pages[0].Controls.Clear();
+            pages[0].Controls.Add(tabAudio);
+
             ApplyTheme();
             SelectTab(Settings.GetI("active_tab", 0));
 
@@ -180,7 +192,13 @@ namespace VanishFF
             themeBtn.BackColor = Theme.Current.WindowBg;
             themeBtn.ForeColor = Theme.Current.TextDim;
             Theme.ApplyTitleBar(this);
+            if (tabAudio != null) tabAudio.RefreshTheme();
             Invalidate(true);
+        }
+
+        public void SetStatus(string text)
+        {
+            statusLabel.Text = text;
         }
 
         void OnClosing(object sender, FormClosingEventArgs e)
@@ -193,6 +211,7 @@ namespace VanishFF
             Settings.Set("win_y", bounds.Y);
             Settings.Set("win_max", WindowState == FormWindowState.Maximized);
             Settings.Set("active_tab", activeTab);
+            if (tabAudio != null) tabAudio.SaveSettings();
             Settings.Save();
         }
     }
