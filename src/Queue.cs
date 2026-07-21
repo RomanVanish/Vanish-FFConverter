@@ -26,6 +26,8 @@ namespace VanishFF
         public Action<FileEntry> EntryChanged;          // статус обновился
         public Action<string> Status;                   // статусная полоса
         public Action<FileEntry, string> Log;           // строка в консоль
+        public Action<int> Progress;                    // прогресс-бар, 0..100
+        public Action<string> Stage;                    // этап текущего файла
         public Action QueueFinished;
 
         public QueueManager(Control uiControl)
@@ -103,6 +105,9 @@ namespace VanishFF
             skipCurrent = false;
             var t0 = DateTime.Now;
 
+            entry.Results = null;        // повторный прогон — итоги с нуля
+            entry.OutputPath = null;
+            entry.ResultSummary = null;
             OnUi(delegate
             {
                 entry.Status = FileStatus.Working;
@@ -122,6 +127,21 @@ namespace VanishFF
             {
                 OnUi(delegate { if (Log != null) Log(entry, line); });
             };
+            ctx.Progress = delegate(int pct)
+            {
+                OnUi(delegate { if (Progress != null) Progress(pct); });
+            };
+            ctx.Stage = delegate(string stage)
+            {
+                OnUi(delegate { if (Stage != null) Stage(stage); });
+            };
+            ctx.Result = delegate(string outPath, string summary)
+            {
+                if (entry.OutputPath == null) entry.OutputPath = outPath;
+                entry.ResultSummary = summary;
+                if (entry.Results == null) entry.Results = new List<string[]>();
+                entry.Results.Add(new[] { outPath, summary });
+            };
 
             FileStatus result = FileStatus.Done;
             string note = "";
@@ -131,8 +151,18 @@ namespace VanishFF
             }
             catch (JobCancelledException)
             {
-                result = FileStatus.Skipped;
-                note = stopNow ? "остановлено" : "пропущено";
+                if (stopNow)
+                {
+                    // полный стоп — файл возвращается в очередь, чтобы
+                    // «Старт» возобновил его с начала (недоделок нет)
+                    result = FileStatus.Queued;
+                    note = "";
+                }
+                else
+                {
+                    result = FileStatus.Skipped;   // пропуск текущего
+                    note = "пропущено";
+                }
             }
             catch (JobSkippedException ex)
             {
@@ -155,9 +185,13 @@ namespace VanishFF
                 entry.Status = result;
                 entry.Note = note;
                 entry.DoneSeconds = secs;
-                if (result != FileStatus.Done && Log != null)
-                    Log(entry, result == FileStatus.Error
-                        ? "ОШИБКА: " + note : ">>> " + note);
+                if (Log != null)
+                {
+                    if (result == FileStatus.Error) Log(entry, "ОШИБКА: " + note);
+                    else if (result == FileStatus.Skipped) Log(entry, ">>> " + note);
+                    else if (result == FileStatus.Queued)
+                        Log(entry, ">>> остановлено — вернулось в очередь");
+                }
                 if (EntryChanged != null) EntryChanged(entry);
             });
         }

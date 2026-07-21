@@ -21,6 +21,8 @@ namespace VanishFF
         public Color StQueued;   // статусы файлов (ТЗ 2.6)
         public Color StDone;
         public Color StError;
+        public Color StWorking;  // «в работе» — яркий фиолетовый
+        public Color StatusText; // жёлтый текст статуса внизу окна
     }
 
     static class Theme
@@ -40,6 +42,8 @@ namespace VanishFF
             StQueued = FromHex("D9C27A"),
             StDone = FromHex("7FBF7F"),
             StError = FromHex("E08080"),
+            StWorking = FromHex("B794F6"),
+            StatusText = FromHex("F2C94C"),
         };
 
         public static readonly Palette Light = new Palette
@@ -57,9 +61,19 @@ namespace VanishFF
             StQueued = FromHex("A8862B"),
             StDone = FromHex("3E8E3E"),
             StError = FromHex("C05050"),
+            StWorking = FromHex("7C3AED"),
+            StatusText = FromHex("B8860B"),
         };
 
         public static Palette Current = Dark;
+
+        public static Color Blend(Color a, Color b, float t)
+        {
+            return Color.FromArgb(
+                (int)(a.R + (b.R - a.R) * t),
+                (int)(a.G + (b.G - a.G) * t),
+                (int)(a.B + (b.B - a.B) * t));
+        }
 
         public static Color FromHex(string hex)
         {
@@ -110,10 +124,59 @@ namespace VanishFF
                 return;
             }
 
-            if (c is TextBox || c is ListBox || c is ListView || c is ComboBox)
+            // рамка вокруг поля/списка (WinForms рисует системную белую —
+            // мы её прячем и даём свою через Panel-обёртку, ТЗ 2.6)
+            if (tag == "border")
+            {
+                c.BackColor = p.Border;
+                return;
+            }
+
+            // значок ⓘ — песочный, фон прозрачный (берёт цвет родителя)
+            if (tag == "info")
+            {
+                c.BackColor = Color.Transparent;
+                c.ForeColor = p.StQueued;
+                return;
+            }
+
+            // рамка-группа (нормализация + цель): чуть приподнятый фон
+            if (tag == "group")
             {
                 c.BackColor = p.PanelBg;
                 c.ForeColor = p.Text;
+                return;
+            }
+
+            // жёлтый текст статуса внизу окна
+            if (tag == "status")
+            {
+                c.BackColor = Color.Transparent;
+                c.ForeColor = p.StatusText;
+                return;
+            }
+
+            var combo = c as ComboBox;
+            if (combo != null)
+            {
+                // FlatStyle.Flat заставляет DropDownList честно красить фон
+                combo.FlatStyle = FlatStyle.Flat;
+                combo.BackColor = p.PanelBg;
+                combo.ForeColor = p.Text;
+                return;
+            }
+
+            if (c is TextBox || c is ListBox || c is ListView)
+            {
+                c.BackColor = p.PanelBg;
+                c.ForeColor = p.Text;
+                return;
+            }
+
+            var track = c as TrackBar;
+            if (track != null)
+            {
+                c.BackColor = p.PanelBg;
                 return;
             }
 
@@ -127,6 +190,15 @@ namespace VanishFF
             {
                 c.BackColor = p.PanelBg;
                 c.ForeColor = p.Text;
+                return;
+            }
+
+            // подписи/флажки — прозрачный фон, чтобы совпадать с любым
+            // родителем (окно, панель, рамка-группа)
+            if (c is Label || c is CheckBox || c is RadioButton)
+            {
+                c.BackColor = Color.Transparent;
+                c.ForeColor = (tag == "dim") ? p.TextDim : p.Text;
                 return;
             }
 

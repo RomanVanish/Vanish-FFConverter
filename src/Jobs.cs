@@ -21,6 +21,9 @@ namespace VanishFF
         public AudioSettings Job;      // снимок настроек (null = нет задания)
         public double DoneSeconds;     // время обработки
         public int BatchIndex = 1;     // номер в пачке для тегов {#}
+        public string ResultSummary;   // краткий итог (размеры/сжатие)
+        public string OutputPath;      // путь результата (для «открыть папку»)
+        public List<string[]> Results; // все выходные файлы: [путь, размеры]
 
         public string Name { get { return System.IO.Path.GetFileName(Path); } }
     }
@@ -53,12 +56,12 @@ namespace VanishFF
         {
             var sb = new StringBuilder();
             sb.Append(Format);
-            if (Format == "opus" || Format == "mp3" || Format == "aac")
-            {
-                if (VbrMode && Format == "mp3") sb.Append(" V" + VbrQuality);
-                else if (VbrMode && Format == "aac") sb.Append(" q" + VbrQuality);
-                else sb.Append(" " + BitrateKbps + "k");
-            }
+            if (Format == "opus")
+                sb.Append(" " + BitrateKbps + "k");
+            else if (Format == "mp3")
+                sb.Append(VbrMode ? " V" + VbrQuality : " " + BitrateKbps + "k");
+            else if (Format == "aac")
+                sb.Append(VbrMode ? " q" + VbrQuality : " " + BitrateKbps + "k");
             sb.Append(Channels == "mono" ? ", моно"
                     : Channels == "stereo" ? ", по ушам" : "");
             if (Normalize) sb.Append(", норм. " + Lufs);
@@ -71,8 +74,31 @@ namespace VanishFF
     class JobContext
     {
         public Action<string> Log;
+        public Action<int> Progress;      // 0..100 текущего ФАЙЛА (монотонно)
+        public Action<string> Stage;      // человекочитаемый этап
+        public Action<string, string> Result;   // (путь результата, размеры)
         public Func<bool> Cancelled;
         public string TempDir;
+
+        // прогресс файла складывается из равных долей-«шагов» (каждый вызов
+        // ffmpeg — один шаг). Внутри шага двигаемся по сырым % ffmpeg.
+        public int TotalSteps;
+        int stepIndex = -1;
+
+        public void BeginStep(string label)
+        {
+            stepIndex++;
+            if (Stage != null) Stage(label);
+            if (Progress != null && TotalSteps > 0)
+                Progress((int)(100.0 * stepIndex / TotalSteps));
+        }
+
+        public void StepPct(int rawPct)
+        {
+            if (Progress == null || TotalSteps <= 0) return;
+            double p = (stepIndex + rawPct / 100.0) / TotalSteps * 100.0;
+            Progress((int)Math.Max(0, Math.Min(100, p)));
+        }
     }
 
     // Порт listening.py: извлечение дорожек, двухпроходный loudnorm,
@@ -90,6 +116,8 @@ namespace VanishFF
             foreach (int t in s.Tracks)
                 if (t < probe.Audio.Count) tracks.Add(t);
             if (tracks.Count == 0) tracks.Add(0);
+
+            ctx.TotalSteps = CountSteps(s, tracks.Count);
 
             string outDir = string.IsNullOrEmpty(s.OutputDir)
                 ? Path.GetDirectoryName(entry.Path) : s.OutputDir;
@@ -205,6 +233,8 @@ namespace VanishFF
                               JobContext ctx)
         {
             string stderr;
+            ctx.BeginStep("измерение громкости");
+            ctx.Log("▸ Измерение громкости");
             string args = string.Format("-i {0} -af {1}:print_format=json -f null -",
                                         FF.Quote(wav), Loudnorm(s));
             LogCmd(args, s, ctx);
@@ -225,6 +255,22 @@ namespace VanishFF
             }
             var d = new System.Web.Script.Serialization.JavaScriptSerializer()
                 .Deserialize<Dictionary<string, string>>(m.Value);
+
+            // Цифровая тишина / почти пустая дорожка -> измеренная громкость
+            // = -inf, и второй проход падает («out of range»). В этом случае
+            // нормализуем одним динамическим проходом (без measured_*).
+            foreach (var k in new[] { "input_i", "input_tp", "input_lra",
+                                      "input_thresh" })
+            {
+                string v = d.ContainsKey(k) ? d[k] : "";
+                if (v.IndexOf("inf", StringComparison.OrdinalIgnoreCase) >= 0
+                    || v.IndexOf("nan", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    ctx.Log("      (дорожка тихая/пустая — нормализация одним "
+                            + "проходом)");
+                    return "";
+                }
+            }
             return string.Format(
                 ":measured_I={0}:measured_TP={1}:measured_LRA={2}" +
                 ":measured_thresh={3}:offset={4}:linear=true",
@@ -298,12 +344,32 @@ namespace VanishFF
             return 48000;
         }
 
+        // Число вызовов ffmpeg у файла (= число «шагов» прогресс-бара).
+        // ExtractNormalized: извлечение(1) + при нормализации измерение(1)
+        // + нормализация(1). Encode: 1.
+        static int CountSteps(AudioSettings s, int trackCount)
+        {
+            int per = s.Normalize ? 3 : 1;
+            if (s.Channels == "original" && trackCount > 1)
+                return trackCount * (per + 1);   // каждая дорожка -> свой файл
+            if (s.Channels == "stereo")
+                return 2 * per + 1;
+            if (s.Channels == "mono" && trackCount > 1)
+                return trackCount * per + 1;
+            return per + 1;                        // одиночный файл
+        }
+
         static void RunStep(string args, bool quiet, double duration,
                             string label, AudioSettings s, JobContext ctx)
         {
+            ctx.BeginStep(label);
+            ctx.Log("▸ " + Cap(label));   // человекочитаемая пометка этапа
             LogCmd(args, s, ctx);
             string stderr;
-            int code = FF.Run(args, quiet, duration, MakePct(label, ctx),
+            // в подробном режиме НЕ подавляем вывод ffmpeg (иначе идёт
+            // только -loglevel error и галка визуально ничего не меняет)
+            int code = FF.Run(args, quiet && !s.Verbose, duration,
+                MakePct(label, ctx),
                 s.Verbose ? MakeVerbose(ctx) : (Action<string>)null,
                 ctx.Cancelled, out stderr);
             CheckCancel(ctx);
@@ -322,6 +388,7 @@ namespace VanishFF
             int last = -25;
             return delegate(int pct)
             {
+                ctx.StepPct(pct);            // монотонный прогресс файла
                 if (pct - last >= 25 || pct == 100)
                 {
                     last = pct;
@@ -347,6 +414,12 @@ namespace VanishFF
             return text;
         }
 
+        static string Cap(string s)
+        {
+            return string.IsNullOrEmpty(s) ? s
+                : char.ToUpper(s[0]) + s.Substring(1);
+        }
+
         static string JoinTracks(List<int> t)
         {
             var parts = new List<string>();
@@ -358,12 +431,13 @@ namespace VanishFF
         {
             double outMb = new FileInfo(outPath).Length / 1048576.0;
             double srcMb = new FileInfo(entry.Path).Length / 1048576.0;
+            string ratio = (outMb > 0 && srcMb / outMb >= 1.05)
+                ? " (сжатие в " + (srcMb / outMb).ToString("0.0") + " раза)" : "";
             ctx.Log(string.Format("Готово: {0}", outPath));
-            ctx.Log(string.Format("Размер: {0:0.0} МБ -> {1:0.0} МБ" +
-                (outMb > 0 && srcMb / outMb >= 1.05
-                    ? " (сжатие в " + (srcMb / outMb).ToString("0.0") + " раза)"
-                    : ""),
-                srcMb, outMb));
+            string size = string.Format("{0:0.0} МБ -> {1:0.0} МБ{2}",
+                srcMb, outMb, ratio);
+            ctx.Log("Размер: " + size);
+            if (ctx.Result != null) ctx.Result(outPath, size);
         }
 
         // Имя результата по шаблону; null = пропустить (уже существует).
@@ -407,7 +481,10 @@ namespace VanishFF
 
             if (name.Length == 0) name = baseName;
             name = Regex.Replace(name, "[<>:\"/\\\\|?*]", "_");
-            string outPath = Path.Combine(outDir, name + "." + s.Format);
+            // aac -> .m4a (контейнер MP4): в сыром .aac нет длительности и
+            // перемотки, часть плееров (foobar2000) их не показывает
+            string ext = s.Format == "aac" ? "m4a" : s.Format;
+            string outPath = Path.Combine(outDir, name + "." + ext);
 
             if (string.Equals(Path.GetFullPath(outPath),
                               Path.GetFullPath(entry.Path),
